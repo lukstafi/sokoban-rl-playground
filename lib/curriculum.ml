@@ -16,7 +16,7 @@ type curriculum_config = {
 
 let default_curriculum = {
   corridor_lengths = [3; 4; 5; 6; 7];
-  room_sizes = [(4, 4); (5, 5); (6, 5); (6, 6); (7, 7)];
+  room_sizes = [(5, 5); (6, 5); (6, 6); (7, 6); (7, 7)];
   box_counts = [1; 2; 2; 3; 3];
 }
 
@@ -34,82 +34,261 @@ let generate_corridor_level length =
   set_cell state box_pos Box;
   state
 
-(** Generate a room with walls *)
+(** Generate a room with walls using greedy incremental placement *)
 let generate_room_level width height =
-  let state = make_state width height in
+  let max_attempts = 50 in
   
-  for x = 0 to width - 1 do
-    state.grid.(0).(x) <- Wall;
-    state.grid.(height - 1).(x) <- Wall
-  done;
-  
-  for y = 0 to height - 1 do
-    state.grid.(y).(0) <- Wall;
-    state.grid.(y).(width - 1) <- Wall
-  done;
-  
-  let player_x = 1 + Random.int (width - 2) in
-  let player_y = 1 + Random.int (height - 2) in
-  state.grid.(player_y).(player_x) <- Player;
-  let player_pos = (player_x, player_y) in
-  
-  let rec place_box_and_target () =
-    let box_x = 1 + Random.int (width - 2) in
-    let box_y = 1 + Random.int (height - 2) in
-    let target_x = 1 + Random.int (width - 2) in
-    let target_y = 1 + Random.int (height - 2) in
-    
-    if (box_x, box_y) <> player_pos && (target_x, target_y) <> player_pos &&
-       (box_x, box_y) <> (target_x, target_y) then begin
-      state.grid.(box_y).(box_x) <- Box;
-      state.grid.(target_y).(target_x) <- Target
+  let rec attempt n =
+    if n >= max_attempts then begin
+      (* Fall back to a simple working configuration *)
+      let state = make_state width height in
+      
+      (* Create walls *)
+      for x = 0 to width - 1 do
+        state.grid.(0).(x) <- Wall;
+        state.grid.(height - 1).(x) <- Wall
+      done;
+      for y = 0 to height - 1 do
+        state.grid.(y).(0) <- Wall;
+        state.grid.(y).(width - 1) <- Wall
+      done;
+      
+      (* Simple working setup: player at (1,1), box at (2,1), target at (3,1) *)
+      state.grid.(1).(1) <- Player;
+      state.grid.(1).(2) <- Box;
+      state.grid.(1).(3) <- Target;
+      { state with player_pos = (1, 1) }
     end else
-      place_box_and_target ()
+      let state = make_state width height in
+      
+      (* Create walls *)
+      for x = 0 to width - 1 do
+        state.grid.(0).(x) <- Wall;
+        state.grid.(height - 1).(x) <- Wall
+      done;
+      for y = 0 to height - 1 do
+        state.grid.(y).(0) <- Wall;
+        state.grid.(y).(width - 1) <- Wall
+      done;
+      
+      (* Get all inner positions - for small rooms, include corners *)
+      let all_positions = ref [] in
+      let include_corners = width <= 5 || height <= 5 in
+      for x = 1 to width - 2 do
+        for y = 1 to height - 2 do
+          if include_corners || not (Sokoban.is_corner (x, y) state) then
+            all_positions := (x, y) :: !all_positions
+        done
+      done;
+      
+      (* Shuffle positions *)
+      let shuffle lst =
+        let arr = Array.of_list lst in
+        for i = Array.length arr - 1 downto 1 do
+          let j = Random.int (i + 1) in
+          let tmp = arr.(i) in
+          arr.(i) <- arr.(j);
+          arr.(j) <- tmp
+        done;
+        Array.to_list arr
+      in
+      
+      let positions = shuffle !all_positions in
+      
+      (* Try to place player, box, and target *)
+      match positions with
+      | [] -> attempt (n + 1)
+      | p1 :: rest_positions ->
+        (* Place player first *)
+        let (px, py) = p1 in
+        state.grid.(py).(px) <- Player;
+        
+        (* Try different combinations for box and target *)
+        let try_placement (bx, by) (tx, ty) =
+          (* Don't place box and target in same position *)
+          if (bx, by) = (tx, ty) then false
+          else begin
+            (* Temporarily place box *)
+            state.grid.(by).(bx) <- Box;
+            
+            (* For small rooms, allow corner placements if target is there *)
+            let corner_ok = 
+              if width <= 5 && height <= 5 then
+                (* In small rooms, box in corner is OK if target is also in corner *)
+                if Sokoban.is_corner (bx, by) state then
+                  Sokoban.is_corner (tx, ty) state
+                else
+                  true
+              else
+                (* In larger rooms, avoid corners for boxes *)
+                not (Sokoban.is_corner (bx, by) state)
+            in
+            
+            if not corner_ok then begin
+              state.grid.(by).(bx) <- Empty;
+              false
+            end else begin
+              (* Place target *)
+              state.grid.(ty).(tx) <- Target;
+              
+              (* Check if configuration is potentially solvable *)
+              let test_state = { state with player_pos = (px, py) } in
+              if Sokoban.is_potentially_solvable test_state then
+                true
+              else begin
+                (* Revert changes *)
+                state.grid.(by).(bx) <- Empty;
+                state.grid.(ty).(tx) <- Empty;
+                false
+              end
+            end
+          end
+        in
+        
+        (* Try multiple placement combinations *)
+        let rec try_combinations = function
+          | [] -> None
+          | (b, t) :: rest ->
+            if try_placement b t then
+              Some { state with player_pos = (px, py) }
+            else begin
+              (* Clean up any leftover state *)
+              let (bx, by) = b in
+              let (tx, ty) = t in
+              state.grid.(by).(bx) <- Empty;
+              state.grid.(ty).(tx) <- Empty;
+              try_combinations rest
+            end
+        in
+        
+        (* Generate different position combinations *)
+        let combinations = match rest_positions with
+          | p2 :: p3 :: p4 :: _ -> 
+            [(p2, p3); (p2, p4); (p3, p2); (p3, p4); (p4, p2); (p4, p3)]
+          | p2 :: p3 :: [] ->
+            [(p2, p3); (p3, p2)]
+          | _ -> []
+        in
+        
+        match try_combinations combinations with
+        | Some final_state -> final_state
+        | None -> attempt (n + 1)
   in
-  
-  place_box_and_target ();
-  { state with player_pos }
+  attempt 0
 
-(** Generate a level with multiple boxes *)
+(** Generate a level with multiple boxes using greedy placement *)
 let generate_multibox_level num_boxes =
   let size = max 5 (num_boxes + 3) in
-  let state = make_state size size in
+  let max_attempts = 50 in
   
-  for x = 0 to size - 1 do
-    state.grid.(0).(x) <- Wall;
-    state.grid.(size - 1).(x) <- Wall
-  done;
-  
-  for y = 0 to size - 1 do
-    state.grid.(y).(0) <- Wall;
-    state.grid.(y).(size - 1) <- Wall
-  done;
-  
-  let used_positions = ref [] in
-  
-  let rec find_free_position () =
-    let x = 1 + Random.int (size - 2) in
-    let y = 1 + Random.int (size - 2) in
-    if List.mem (x, y) !used_positions then
-      find_free_position ()
-    else begin
-      used_positions := (x, y) :: !used_positions;
-      (x, y)
-    end
+  let rec attempt n =
+    if n >= max_attempts then begin
+      (* Fall back to simple line configuration *)
+      let state = make_state size size in
+      
+      (* Create walls *)
+      for x = 0 to size - 1 do
+        state.grid.(0).(x) <- Wall;
+        state.grid.(size - 1).(x) <- Wall
+      done;
+      for y = 0 to size - 1 do
+        state.grid.(y).(0) <- Wall;
+        state.grid.(y).(size - 1) <- Wall
+      done;
+      
+      (* Simple line setup *)
+      state.grid.(1).(1) <- Player;
+      for i = 0 to num_boxes - 1 do
+        state.grid.(2).(2 + i) <- Box;
+        state.grid.(3).(2 + i) <- Target
+      done;
+      { state with player_pos = (1, 1) }
+    end else
+      let state = make_state size size in
+      
+      (* Create walls *)
+      for x = 0 to size - 1 do
+        state.grid.(0).(x) <- Wall;
+        state.grid.(size - 1).(x) <- Wall
+      done;
+      for y = 0 to size - 1 do
+        state.grid.(y).(0) <- Wall;
+        state.grid.(y).(size - 1) <- Wall
+      done;
+      
+      (* Get all inner positions and avoid corners *)
+      let valid_positions = ref [] in
+      for x = 1 to size - 2 do
+        for y = 1 to size - 2 do
+          if not (Sokoban.is_corner (x, y) state) then
+            valid_positions := (x, y) :: !valid_positions
+        done
+      done;
+      
+      if List.length !valid_positions < 1 + 2 * num_boxes then
+        attempt (n + 1)
+      else
+        (* Shuffle positions *)
+        let shuffle lst =
+          let arr = Array.of_list lst in
+          for i = Array.length arr - 1 downto 1 do
+            let j = Random.int (i + 1) in
+            let tmp = arr.(i) in
+            arr.(i) <- arr.(j);
+            arr.(j) <- tmp
+          done;
+          Array.to_list arr
+        in
+        
+        let positions = shuffle !valid_positions in
+        
+        (* Place player *)
+        match positions with
+        | [] -> attempt (n + 1)
+        | player_pos :: rest ->
+          let (px, py) = player_pos in
+          state.grid.(py).(px) <- Player;
+          
+          (* Try to place boxes and targets greedily *)
+          let rec place_boxes remaining boxes_to_place =
+            if boxes_to_place = 0 then
+              Some remaining
+            else
+              match remaining with
+              | [] | [_] -> None  (* Need at least 2 positions per box *)
+              | pos1 :: pos2 :: rest ->
+                let (x1, y1) = pos1 in
+                let (x2, y2) = pos2 in
+                
+                (* Try pos1 as box, pos2 as target *)
+                state.grid.(y1).(x1) <- Box;
+                if Sokoban.is_box_deadlocked (x1, y1) state then begin
+                  state.grid.(y1).(x1) <- Empty;
+                  (* Try pos2 as box, pos1 as target *)
+                  state.grid.(y2).(x2) <- Box;
+                  if Sokoban.is_box_deadlocked (x2, y2) state then begin
+                    state.grid.(y2).(x2) <- Empty;
+                    None  (* Both positions fail *)
+                  end else begin
+                    state.grid.(y1).(x1) <- Target;
+                    place_boxes rest (boxes_to_place - 1)
+                  end
+                end else begin
+                  state.grid.(y2).(x2) <- Target;
+                  place_boxes rest (boxes_to_place - 1)
+                end
+          in
+          
+          match place_boxes rest num_boxes with
+          | Some _ ->
+            let final_state = { state with player_pos } in
+            if Sokoban.is_potentially_solvable final_state then
+              final_state
+            else
+              attempt (n + 1)
+          | None -> attempt (n + 1)
   in
-  
-  let player_pos = find_free_position () in
-  let (px, py) = player_pos in
-  state.grid.(py).(px) <- Player;
-  
-  for _ = 1 to num_boxes do
-    let (bx, by) = find_free_position () in
-    state.grid.(by).(bx) <- Box;
-    let (tx, ty) = find_free_position () in
-    state.grid.(ty).(tx) <- Target
-  done;
-  
-  { state with player_pos }
+  attempt 0
 
 (** Generate a complex predefined level *)
 let generate_complex_level () =

@@ -2,3 +2,27 @@
  (public_name sokoban-rl-playground)
  (name main)
  (libraries sokoban_rl_playground))
+
+(executable
+ (name test_quick)
+ (libraries sokoban_rl_playground))
+
+(executable
+ (name test_room_gen)
+ (libraries sokoban_rl_playground))
+
+(executable
+ (name test_room_debug)
+ (libraries sokoban_rl_playground))
+
+(executable
+ (name test_gen_simple)
+ (libraries sokoban_rl_playground))
+
+(executable
+ (name test_simple_gen)
+ (libraries sokoban_rl_playground))
+
+(executable
+ (name test_gen_debug)
+ (libraries sokoban_rl_playground))

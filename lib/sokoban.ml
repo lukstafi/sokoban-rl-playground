@@ -177,3 +177,102 @@ let parse_level level_string =
   ) lines;
   
   { state with player_pos = !player_pos }
+
+(** Deadlock detection for unsolvable states *)
+
+let is_corner pos state =
+  let (x, y) = pos in
+  let is_wall_or_boundary (px, py) =
+    px < 0 || px >= state.width || py < 0 || py >= state.height ||
+    state.grid.(py).(px) = Wall
+  in
+  (* Check if position is in a corner (two adjacent walls) *)
+  (is_wall_or_boundary (x-1, y) && is_wall_or_boundary (x, y-1)) ||
+  (is_wall_or_boundary (x-1, y) && is_wall_or_boundary (x, y+1)) ||
+  (is_wall_or_boundary (x+1, y) && is_wall_or_boundary (x, y-1)) ||
+  (is_wall_or_boundary (x+1, y) && is_wall_or_boundary (x, y+1))
+
+let is_box_deadlocked (x, y) state =
+  let cell = get_cell state (x, y) in
+  if not (is_box cell) then false
+  else if cell = BoxOnTarget then false  (* Box is already on target *)
+  else
+    (* Check if box is in a corner without a target *)
+    if is_corner (x, y) state && get_cell state (x, y) <> BoxOnTarget then
+      true
+    else
+      (* Check for deadlock patterns along walls *)
+      let is_wall_at (dx, dy) = 
+        get_cell state (x + dx, y + dy) = Wall 
+      in
+      let _is_box_at (dx, dy) =
+        is_box (get_cell state (x + dx, y + dy))
+      in
+      (* Horizontal wall deadlock *)
+      if (is_wall_at (0, -1) || is_wall_at (0, 1)) then
+        (* Box against horizontal wall - check if it can ever reach a target *)
+        let rec check_horizontal_line pos dir =
+          let nx = pos + dir in
+          if nx < 0 || nx >= state.width then true
+          else
+            let cell = get_cell state (nx, y) in
+            if cell = Wall then true
+            else if cell = Target || cell = BoxOnTarget || cell = PlayerOnTarget then false
+            else if is_box cell && is_corner (nx, y) state then true
+            else check_horizontal_line nx dir
+        in
+        check_horizontal_line x 1 && check_horizontal_line x (-1)
+      (* Vertical wall deadlock *)
+      else if (is_wall_at (-1, 0) || is_wall_at (1, 0)) then
+        let rec check_vertical_line pos dir =
+          let ny = pos + dir in
+          if ny < 0 || ny >= state.height then true
+          else
+            let cell = get_cell state (x, ny) in
+            if cell = Wall then true
+            else if cell = Target || cell = BoxOnTarget || cell = PlayerOnTarget then false
+            else if is_box cell && is_corner (x, ny) state then true
+            else check_vertical_line ny dir
+        in
+        check_vertical_line y 1 && check_vertical_line y (-1)
+      else
+        false
+
+let has_deadlock state =
+  try
+    for y = 0 to state.height - 1 do
+      for x = 0 to state.width - 1 do
+        if is_box_deadlocked (x, y) state then
+          raise Exit
+      done
+    done;
+    false
+  with Exit -> true
+
+let count_targets state =
+  let count = ref 0 in
+  for y = 0 to state.height - 1 do
+    for x = 0 to state.width - 1 do
+      match state.grid.(y).(x) with
+      | Target | BoxOnTarget | PlayerOnTarget -> incr count
+      | _ -> ()
+    done
+  done;
+  !count
+
+let count_boxes state =
+  let count = ref 0 in
+  for y = 0 to state.height - 1 do
+    for x = 0 to state.width - 1 do
+      match state.grid.(y).(x) with
+      | Box | BoxOnTarget -> incr count
+      | _ -> ()
+    done
+  done;
+  !count
+
+let is_potentially_solvable state =
+  (* Basic checks *)
+  let num_boxes = count_boxes state in
+  let num_targets = count_targets state in
+  num_boxes = num_targets && num_boxes > 0 && not (has_deadlock state)

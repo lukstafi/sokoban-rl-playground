@@ -1,2 +1,12 @@
 (test
  (name test_sokoban_rl_playground))
+
+(executable
+ (name test_solvability)
+ (modules test_solvability)
+ (libraries sokoban_rl_playground))
+
+(executable
+ (name test_simple)
+ (modules test_simple)
+ (libraries sokoban_rl_playground))
