@@ -20,19 +20,55 @@ let default_curriculum = {
   box_counts = [1; 2; 2; 3; 3];
 }
 
-(** Generate a simple corridor level *)
+(** Generate a simple corridor level with random orientation *)
 let generate_corridor_level length =
-  let width = length + 2 in
-  let level = String.concat "\n" [
-    String.make width '#';
-    "#" ^ String.make (length - 2) ' ' ^ "@.#";
-    String.make width '#';
-  ] in
+  (* Randomly choose horizontal or vertical *)
+  let horizontal = Random.bool () in
   
-  let state = parse_level level in
-  let box_pos = (length - 1, 1) in
-  set_cell state box_pos Box;
-  state
+  if horizontal then
+    (* Horizontal corridor *)
+    let width = length + 2 in
+    let height = 3 in
+    let state = make_state width height in
+    
+    (* Create walls *)
+    for x = 0 to width - 1 do
+      set_cell state (x, 0) Wall;
+      set_cell state (x, height - 1) Wall
+    done;
+    for y = 0 to height - 1 do
+      set_cell state (0, y) Wall;
+      set_cell state (width - 1, y) Wall
+    done;
+    
+    (* Place entities in a line *)
+    set_cell state (1, 1) Player;
+    set_cell state (length - 1, 1) Box;
+    set_cell state (length, 1) Target;
+    
+    { state with player_pos = (1, 1) }
+  else
+    (* Vertical corridor *)
+    let width = 3 in
+    let height = length + 2 in
+    let state = make_state width height in
+    
+    (* Create walls *)
+    for x = 0 to width - 1 do
+      set_cell state (x, 0) Wall;
+      set_cell state (x, height - 1) Wall
+    done;
+    for y = 0 to height - 1 do
+      set_cell state (0, y) Wall;
+      set_cell state (width - 1, y) Wall
+    done;
+    
+    (* Place entities in a vertical line *)
+    set_cell state (1, 1) Player;
+    set_cell state (1, length - 1) Box;
+    set_cell state (1, length) Target;
+    
+    { state with player_pos = (1, 1) }
 
 (** Generate a room with walls using greedy incremental placement *)
 let generate_room_level width height =
@@ -376,7 +412,7 @@ let reset_curriculum scheduler =
 
 let get_curriculum_info scheduler =
   let stage_name = match scheduler.stage with
-    | 0 -> "Corridor"
+    | 0 -> "Corridor (mixed H/V)"
     | 1 -> "Room"
     | 2 -> "Multi-box"
     | _ -> "Complex"

@@ -26,3 +26,7 @@
 (executable
  (name test_gen_debug)
  (libraries sokoban_rl_playground))
+
+(executable
+ (name test_corridors)
+ (libraries sokoban_rl_playground))
