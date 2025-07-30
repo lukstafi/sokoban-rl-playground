@@ -1,0 +1,4 @@
+(executable
+ (public_name sokoban-rl-playground)
+ (name main)
+ (libraries sokoban_rl_playground))

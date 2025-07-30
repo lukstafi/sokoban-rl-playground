@@ -1,0 +1,4 @@
+(library
+ (public_name sokoban-rl-playground)
+ (name sokoban_rl_playground)
+ (libraries unix))
