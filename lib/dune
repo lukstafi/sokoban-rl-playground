@@ -1,4 +1,5 @@
 (library
  (public_name sokoban-rl-playground)
  (name sokoban_rl_playground)
+ (modules sokoban visualization tabular_rl tabular_rl_backoff reinforce curriculum)
  (libraries unix))

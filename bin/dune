@@ -30,3 +30,7 @@
 (executable
  (name test_corridors)
  (libraries sokoban_rl_playground))
+
+(executable
+ (name test_backoff)
+ (libraries sokoban_rl_playground))
